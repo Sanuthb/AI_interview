@@ -5,7 +5,7 @@ import { supabase } from "@/services/superbaseClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { ArrowLeft, User, Clock, MessageSquare, Bot } from "lucide-react";
+import { ArrowLeft, User, Clock, MessageSquare, Bot, Star, Zap } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 
 const DetailedReportPage = () => {
@@ -51,6 +51,17 @@ const DetailedReportPage = () => {
     const formatTimestamp = (timestamp) => {
         return new Date(timestamp).toLocaleDateString() + ' ' + new Date(timestamp).toLocaleTimeString();
     }
+    
+    // Safely access feedback data
+    const feedbackData = report.feedback || {};
+    const rating = feedbackData.rating || {};
+    const isRecommended = feedbackData.Recommendation === 'Recommended';
+
+    const getRatingColor = (score) => {
+        if (score > 8) return 'text-green-600';
+        if (score > 5) return 'text-yellow-600';
+        return 'text-red-600';
+    };
 
     return (
         <div className="bg-gray-100 w-full min-h-screen p-4 space-y-6">
@@ -71,18 +82,50 @@ const DetailedReportPage = () => {
                 </CardHeader>
             </Card>
 
-            {/* AI Summary Card */}
-            <Card className="shadow-md">
-                <CardHeader>
-                    <div className="flex items-center gap-2">
-                        <Bot className="w-5 h-5 text-green-600" />
-                        <CardTitle className="text-xl text-green-600">AI Performance Summary</CardTitle>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <p className="whitespace-pre-wrap">{report.summary || "No structured summary was captured for this interview."}</p>
-                </CardContent>
-            </Card>
+            {/* AI Feedback Card - NEW SECTION */}
+            {feedbackData.rating ? (
+                <Card className="shadow-md border-2" style={{ borderColor: isRecommended ? '#10B981' : '#EF4444' }}>
+                    <CardHeader>
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Zap className={`w-5 h-5 ${isRecommended ? 'text-green-600' : 'text-red-600'}`} />
+                                <CardTitle className="text-xl">AI Feedback & Rating</CardTitle>
+                            </div>
+                            <div className={`px-3 py-1 rounded-full font-bold text-white ${isRecommended ? 'bg-green-500' : 'bg-red-500'}`}>
+                                {feedbackData.Recommendation}
+                            </div>
+                        </div>
+                        <CardDescription>{feedbackData.RecommendationMsg}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <Separator />
+                        <h3 className="font-semibold text-lg flex items-center gap-2"><Star className="w-4 h-4" /> Performance Breakdown (Out of 10)</h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            {Object.entries(rating).map(([key, value]) => (
+                                <div key={key} className="p-3 bg-gray-50 rounded-lg text-center">
+                                    <p className="text-sm font-medium capitalize text-gray-500">{key.replace(/([A-Z])/g, ' $1').trim()}</p>
+                                    <p className={`text-2xl font-bold ${getRatingColor(value)}`}>{value}</p>
+                                </div>
+                            ))}
+                        </div>
+                        <Separator />
+                        <h3 className="font-semibold text-lg flex items-center gap-2"><Bot className="w-4 h-4" /> Summary</h3>
+                        <p className="whitespace-pre-wrap text-gray-700">{feedbackData.summary}</p>
+                    </CardContent>
+                </Card>
+            ) : (
+                <Card className="shadow-md">
+                     <CardHeader>
+                        <div className="flex items-center gap-2">
+                            <Bot className="w-5 h-5 text-gray-500" />
+                            <CardTitle className="text-xl text-gray-500">AI Performance Summary</CardTitle>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                         <p className="whitespace-pre-wrap">{report.summary || "No structured summary or feedback was captured for this interview."}</p>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Transcript Card */}
             <Card className="shadow-md">

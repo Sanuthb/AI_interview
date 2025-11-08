@@ -62,6 +62,7 @@ const FormContainer = ({ onhandleInputChange,goToNext }) => {
               <SelectValue placeholder="Select duration" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="2 Min">2 Min</SelectItem>
               <SelectItem value="5 Min">5 Min</SelectItem>
               <SelectItem value="15 Min">15 Min</SelectItem>
               <SelectItem value="30 Min">30 Min</SelectItem>
