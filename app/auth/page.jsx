@@ -15,7 +15,7 @@ const page = () => {
   const [loading, setLoading] = React.useState(false);
   const router = useRouter();
 
-  const handleSubmit = async (e) => {
+ const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
@@ -24,6 +24,8 @@ const page = () => {
     if (error) {
       toast("Error logging in ");
     } else {
+      // MODIFICATION: Save USN to localStorage
+      localStorage.setItem('userUSN', data.USN); 
       toast(`${data.USN} logged in`);
       router.push('/dashboard');
     }
