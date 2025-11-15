@@ -2,7 +2,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { InterviewContext } from "@/context/InterviewContext";
 import React, { useContext, useEffect, useRef, useState } from "react";
-import { BotMessageSquare, Mic, Phone, Timer } from "lucide-react";
+import { BotMessageSquare, Mic, Phone } from "lucide-react";
 import Vapi from "@vapi-ai/web";
 import AlertConfirmation from "./_components/AlertConfirmation";
 import { toast } from "sonner";
@@ -10,36 +10,37 @@ import { supabase } from "@/services/superbaseClient";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios"; // Added for fetching AI feedback
 
-// Utility function to convert duration string (e.g., "15 Min") to milliseconds
-const durationToMilliseconds = (durationStr) => {
-  if (!durationStr) return 0;
-  const [value, unit] = durationStr.split(' ');
-  const minutes = parseInt(value, 10);
-  if (unit === 'Min') {
-    return minutes * 60 * 1000;
-  }
-  return 0; // Default to 0 if format is unknown
-};
-
-// Utility function to format milliseconds to MM:SS
-const formatTime = (ms) => {
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-};
-
 const Page = () => {
   const { interviewdata } = useContext(InterviewContext);
   const videoRef = useRef(null);
-  // Vapi instance is initialized outside of state/effect
-  const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY); 
+  // Stable Vapi instance
+  const vapiRef = useRef(null);
   const { interview_id } = useParams();
   const router = useRouter();
 
   const [callActive, setCallActive] = useState(false);
-  const [transcript, setTranscript] = useState([]);
-  const [remainingTime, setRemainingTime] = useState(0); // State for the countdown timer
+  // transcript now holds objects like: { role: 'user', content: 'hello' }
+  const [transcript, setTranscript] = useState([]); 
+  // Guards to avoid duplicate starts/saves and prevent restart after end
+  const hasStartedRef = useRef(false);
+  const hasEndedRef = useRef(false);
+  const hasSavedRef = useRef(false);
+  const transcriptRef = useRef([]); // Ref for final saving
+
+  // Close user's camera/mic
+  const closeCamera = () => {
+    try {
+      const stream = videoRef.current?.srcObject;
+      if (stream && typeof stream.getTracks === 'function') {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    } catch (e) {
+      console.warn("Failed to close camera:", e);
+    }
+  };
 
   // Function to save results and call AI for feedback
   const saveResults = async (jobPosition, finalTranscript) => {
@@ -73,19 +74,29 @@ const Page = () => {
     // 3. Save to Supabase
     try {
       const finalSummary = feedback.feedback.summary || "AI summary not explicitly captured. See full transcript.";
-      const { data, error } = await supabase
+      // Store student display name inside feedback for admin display
+      try {
+        if (feedback && feedback.feedback) {
+          feedback.feedback.candidateName = interviewdata?.Username || "";
+        }
+      } catch (_) {}
+
+      // Use USN for username field so user dashboard filters work
+      const userUSN = (typeof window !== 'undefined') ? localStorage.getItem('userUSN') : null;
+      const usernameForDB = userUSN || interviewdata?.Username || "";
+      const payload = {
+        interviewid: Number(interview_id),
+        username: usernameForDB,
+        jobposition: jobPosition,
+        transcript: finalTranscript,
+        summary: finalSummary,
+        feedback: feedback.feedback, // Save the entire structured feedback object
+      };
+
+      // Avoid .select() after insert to prevent RLS select permission issues
+      const { error } = await supabase
         .from("interview_results")
-        .insert([
-          {
-            interviewid: Number(interview_id),
-            username: interviewdata?.Username,
-            jobposition: jobPosition,
-            transcript: finalTranscript,
-            summary: finalSummary,
-            feedback: feedback.feedback, // Save the entire structured feedback object
-          },
-        ])
-        .select();
+        .insert([payload]);
 
       if (error) throw error;
 
@@ -94,46 +105,113 @@ const Page = () => {
       toast.info(`Summary: ${finalSummary.substring(0, 100)}...`);
 
     } catch (err) {
-      console.error("Error saving interview results:", err);
+      console.error("Error saving interview results:", {
+        message: err?.message,
+        details: err?.details,
+        hint: err?.hint,
+      });
       toast.error("Failed to save interview results.");
     }
   };
 
   // Vapi Event Handlers
   const handleVapiEvents = (event) => {
-    // CRITICAL FIX: Check if event is defined to prevent "Cannot read properties of undefined" error
+    // CRITICAL FIX: Guard clause for TypeError: Cannot read properties of undefined
     if (!event) { 
         console.warn("Received undefined Vapi event. Skipping processing.");
         return;
     }
+    // TEMP DEBUG: Observe raw events to validate payload shapes
+    try { console.debug("[Vapi] Event:", JSON.parse(JSON.stringify(event))); } catch (_) { console.debug("[Vapi] Event:", event); }
     
     if (event.type === "call-end") {
+      hasEndedRef.current = true;
       toast.info("Interview finished. Saving results...");
       setCallActive(false);
 
       // --- CLOSING THE FEEDBACK LOOP ---
-      saveResults(interviewdata?.jobposition, transcript);
-
-      // Redirect after saving
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 3000);
+      if (!hasSavedRef.current) {
+        hasSavedRef.current = true;
+        // Ensure only final transcripts are used for saving
+        saveResults(interviewdata?.jobposition, transcriptRef.current.filter(t => t.content && t.content.trim().length > 0));
+      }
+      // Close camera and go to end screen
+      closeCamera();
+      router.push('/interview/ended');
     }
 
-    // Capture and update transcript
-    if (event.type === "message" && event.message.content) {
-      setTranscript(prev => [...prev, {
-        role: event.message.role,
-        content: event.message.content
-      }]);
+    // =================================================================
+    // 🎤 RELIABLE TRANSCRIPTION CAPTURE using 'speech-update' (User and AI speech)
+    // =================================================================
+    if (event.type === "speech-update" && event.transcript) {
+        // Vapi event uses 'speaker', we map it to 'role'
+        const role = (event.transcript.speaker === "user") ? "user" : "assistant";
+        const text = event.transcript.text;
+        
+        if (text && text.trim().length > 0) {
+            setTranscript((prev) => {
+                const last = prev[prev.length - 1];
+                
+                // If the last message was from the same speaker AND is a partial update,
+                // update the last entry to prevent a long list of partial updates.
+                if (last && last.role === role && !event.transcript.final) {
+                    const updatedTranscript = [...prev.slice(0, -1), { role, content: text }];
+                    transcriptRef.current = updatedTranscript;
+                    return updatedTranscript;
+                }
+                
+                // Otherwise (new speaker or final thought), add a new message.
+                const next = [...prev, { role, content: text }];
+                transcriptRef.current = next;
+                return next;
+            });
+        }
+    }
+    
+    // =================================================================
+    // 💬 Fallback/Final Message Capture for model outputs
+    // This catches responses that might not be audio-only (e.g., tool calls, text)
+    // =================================================================
+    else if (event.type === "message" && event.message) {
+      const role = event.message.role || "assistant";
+      const rawContent = event.message.content;
+
+      // Normalize content: handle string or array/object payloads
+      let text = "";
+      if (typeof rawContent === "string") {
+        text = rawContent;
+      } else if (typeof rawContent === "object" && rawContent !== null) {
+        // Simple extraction for text/content fields
+        text = rawContent.text || rawContent.content || "";
+      }
+
+      if (text && text.trim().length > 0) {
+        setTranscript((prev) => {
+          // Check if speech-update already captured this final text (to avoid duplicates)
+          const last = prev[prev.length - 1];
+          if (last && last.role === role && last.content.includes(text.substring(0, Math.min(text.length, 20)))) return prev;
+          
+          const next = [...prev, { role, content: text }];
+          transcriptRef.current = next;
+          return next;
+        });
+      }
     }
   };
-
+  
   const stopInterview = () => {
     if (callActive) {
-      vapi.stop(); // This should trigger the "call-end" event handler
+      vapiRef.current?.stop(); // This should trigger the "call-end" event handler
       setCallActive(false);
       toast.info("Manually ending interview...");
+      hasEndedRef.current = true;
+      // Save and navigate immediately as a reliable manual flow (guarded to run once)
+      if (!hasSavedRef.current) {
+        hasSavedRef.current = true;
+        saveResults(interviewdata?.jobposition, transcriptRef.current.filter(t => t.content && t.content.trim().length > 0));
+      }
+      closeCamera();
+      router.push('/interview/ended');
     }
   };
 
@@ -191,73 +269,50 @@ Key guidelines:
     };
 
     // Prevent re-starting a call if one is active or starting
-    if (vapi.currentCall?.status === 'active' || vapi.currentCall?.status === 'starting') {
+    if (vapiRef.current?.currentCall?.status === 'active' || vapiRef.current?.currentCall?.status === 'starting') {
         console.warn("Vapi call is already active or starting. Skipping new call initiation.");
         setCallActive(true);
         return;
     }
 
-    vapi.start(assistantOptions);
+    vapiRef.current.start(assistantOptions);
     setCallActive(true);
   };
 
-
-  // Vapi Lifecycle and Timer Handler
+  // Vapi Lifecycle (no timer)
   useEffect(() => {
-    let timerInterval;
+    if (!vapiRef.current) {
+      vapiRef.current = new Vapi(process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY);
+    }
+    
+    // CRITICAL: Attach ALL necessary listeners here
+    vapiRef.current.on("message", handleVapiEvents);
+    vapiRef.current.on("call-end", handleVapiEvents);
+    vapiRef.current.on("speech-update", handleVapiEvents); // <-- The reliable transcription listener
 
-    const startVapiAndTimer = () => {
-        if (!interviewdata || callActive) return;
-
-        startCall();
-        vapi.on("message", handleVapiEvents);
-        vapi.on("call-end", handleVapiEvents);
-
-        // --- SETUP AUTO-STOP TIMER AND UI COUNTDOWN ---
-        const durationMs = durationToMilliseconds(interviewdata.interviewDuration);
-        setRemainingTime(durationMs);
-
-        if (durationMs > 0) {
-            toast.info(`Interview will automatically end in ${interviewdata.interviewDuration}.`);
-
-            const endTime = Date.now() + durationMs;
-
-            timerInterval = setInterval(() => {
-                const now = Date.now();
-                const timeLeft = endTime - now;
-
-                if (timeLeft <= 1000) {
-                    clearInterval(timerInterval);
-                    setRemainingTime(0);
-
-                    // Auto-stop logic (only if still active to avoid double-stop)
-                    if (vapi.currentCall?.status === 'active') {
-                        toast.warning(`Time's up! Interview is automatically ending.`);
-                        stopInterview();
-                    }
-                } else {
-                    setRemainingTime(timeLeft);
-                }
-            }, 1000);
-        }
+    const startVapi = () => {
+      if (!interviewdata) return;
+      if (hasEndedRef.current) return; // do not auto-start after end
+      if (hasStartedRef.current) return; // already started once
+      hasStartedRef.current = true;
+      startCall();
     };
 
-    startVapiAndTimer();
+    startVapi();
 
     // Clean up function runs on unmount or when dependencies change
     return () => {
-        clearInterval(timerInterval);
-        vapi.off("message", handleVapiEvents);
-        vapi.off("call-end", handleVapiEvents);
+      if (!vapiRef.current) return;
+      vapiRef.current.off("message", handleVapiEvents);
+      vapiRef.current.off("call-end", handleVapiEvents);
+      vapiRef.current.off("speech-update", handleVapiEvents); // <-- Remove listener on cleanup
 
-        // **CRITICAL FIX for unhandled errors/multiple instances:**
-        // Check if the current call object exists and its status is not 'ended' or 'error'
-        if (vapi.currentCall && vapi.currentCall.status !== 'ended' && vapi.currentCall.status !== 'error') {
-            console.log(`Cleaning up Vapi call with status: ${vapi.currentCall.status}`);
-            vapi.stop(); // Manually stop the call if it's still running
-        }
+      if (vapiRef.current.currentCall && vapiRef.current.currentCall.status !== 'ended' && vapiRef.current.currentCall.status !== 'error') {
+        console.log(`Cleaning up Vapi call with status: ${vapiRef.current.currentCall.status}`);
+        vapiRef.current.stop();
+      }
     };
-  }, [interviewdata, interview_id, router]); // Dependency array: vapi is stable outside of state
+  }, [interviewdata, interview_id, router]);
 
   // Enable user camera (logic remains the same)
   useEffect(() => {
@@ -281,15 +336,6 @@ Key guidelines:
 
   return (
     <div className="bg-black w-full h-full flex flex-col items-center justify-between overflow-hidden">
-        {/* Interview Timer */}
-        {interviewdata?.interviewDuration && durationToMilliseconds(interviewdata.interviewDuration) > 0 && (
-             <div className="absolute top-4 right-4 bg-primary/80 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 z-10">
-                <Timer className="w-5 h-5" />
-                <span className="font-bold text-lg">
-                    {formatTime(remainingTime)}
-                </span>
-            </div>
-        )}
       {/* Main video section */}
       <div className="flex items-center justify-center gap-8 w-full max-w-6xl flex-1">
         {/* Interviewer card */}
@@ -320,6 +366,20 @@ Key guidelines:
             </div>
           </CardContent>
         </Card>
+      </div>
+      
+      {/* Live Transcript Display - Shows all conversation for debugging/UX */}
+      <div className="bg-white/10 text-white p-4 w-full max-w-6xl overflow-y-scroll max-h-40 rounded-lg my-4">
+        <h3 className="text-sm font-bold mb-2">Live Transcript:</h3>
+        {transcript.length === 0 ? (
+          <p className="text-xs text-gray-400">Waiting for conversation to begin...</p>
+        ) : (
+          transcript.map((msg, index) => (
+            <p key={index} className={`text-xs ${msg.role === 'user' ? 'text-green-300' : 'text-amber-300'}`}>
+              <strong>{msg.role === 'user' ? 'You:' : 'AI:'}</strong> {msg.content}
+            </p>
+          ))
+        )}
       </div>
 
       {/* Bottom controls */}

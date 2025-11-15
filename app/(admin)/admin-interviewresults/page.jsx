@@ -38,7 +38,7 @@ const Page = () => {
                 // Fetch all interview results
                 const { data, error } = await supabase
                     .from("interview_results")
-                    .select("id, username, jobposition, created_at") 
+                    .select("id, username, jobposition, created_at, feedback") 
                     .order("created_at", { ascending: false });
                 
                 if (error) throw error;
@@ -80,7 +80,7 @@ const Page = () => {
                             <CardHeader>
                                 <CardTitle className="text-xl">{result.jobposition}</CardTitle>
                                 <CardDescription className="flex items-center gap-1">
-                                    <User className="w-4 h-4" /> Candidate: {result.username}
+                                    <User className="w-4 h-4" /> Candidate: {result?.feedback?.candidateName || result.username}
                                 </CardDescription>
                                 <CardDescription className="flex items-center gap-1">
                                     <Calendar className="w-4 h-4" /> Date: {new Date(result.created_at).toLocaleDateString()}

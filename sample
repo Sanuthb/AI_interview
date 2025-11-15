@@ -1,0 +1,224 @@
+// "use client";
+// import { InterviewContext } from "@/context/InterviewContext";
+// import React, { useContext, useEffect, useState } from "react";
+// import { BotMessageSquare, Mic, Phone, User } from "lucide-react";
+// import Vapi from "@vapi-ai/web";
+// import { toast } from "sonner";
+// import axios from "axios";
+
+// const page = () => {
+//   const { interviewdata } = useContext(InterviewContext);
+//   const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY);
+//   const [activeuser, setactiveuser] = useState(false);
+//   const [conversation, setconversation] = useState();
+//   const startcall = async () => {
+//     if (interviewdata) {
+//       let questions = [];
+//       interviewdata?.questionlist.forEach((q) => {
+//         questions.push(q.question);
+//       });
+//       const jobPosition = interviewdata?.jobposition || "Software Developer";
+
+//       const assistantOptions = {
+//         name: "AI Recruiter",
+//         firstMessage: `Hi ${interviewdata?.Username}, how are you? Ready for your interview on ${jobPosition}?`,
+//         transcriber: {
+//           provider: "deepgram",
+//           model: "nova-2",
+//           language: "en-US",
+//         },
+//         voice: {
+//           provider: "playht",
+//           voiceId: "jennifer",
+//         },
+//         model: {
+//           provider: "openai",
+//           model: "gpt-4",
+//           messages: [
+//             {
+//               role: "system",
+//               content: `
+// Your job is to ask candidates provided interview questions, assess their responses.
+// Begin the conversation with a friendly introduction, setting a relaxed yet professional tone. Example:
+// "Hey there! Welcome to your ${jobPosition} interview, let's get started with a few questions!"
+// Ask one question at a time and wait for the candidate's response before proceeding. Keep the questions clear and concise. Below are the questions: {{questionList}}
+// Questions: ${questions}
+// If the candidate struggles, offer hints or rephrase the question without giving away the answer. Example:
+// "What do you think about how React tracks component updates!"
+// Provide brief, encouraging feedback after each answer. Example:
+// "Nice! That's a solid answer."
+// "Hmm, not quite! Want to try again?"
+// Keep the conversation natural and engaging—use casual phrases like "Alright, next up..." or "Let's tackle a tricky one!"
+// After ${questions.length} questions, wrap up the interview smoothly by summarizing their performance. Example:
+// "That was great! You handled some tough questions well. Keep sharpening your skills!"
+// End on a positive note:
+// "Thanks for chatting! Hope to see you crushing projects soon!"
+
+// Key guidelines:
+// ✅ Be friendly, engaging, and witty 🎤
+// ✅ Keep responses short and natural, like a real conversation
+// ✅ Adapt based on the candidate's confidence level
+// ✅ Ensure the interview remains focused on ${jobPosition}`.trim(),
+//             },
+//           ],
+//         },
+//       };
+//       vapi.start(assistantOptions);
+//     }
+//   };
+
+//   const endcall = async () => {
+//     vapi.stop();
+//   };
+
+// useEffect(() => {
+//   const handleMessage = (message) => {
+//     console.log(message);
+//     if (message?.conversation) {
+//       const convoString = JSON.stringify(message.conversation);
+//       console.log(convoString);
+//       setconversation(convoString);
+//     }
+//   };
+
+//   // Define the listener functions with descriptive names
+//   const handleSpeechStart = () => {
+//     setactiveuser(false);
+//   };
+//   const handleSpeechEnd = () => {
+//     setactiveuser(true);
+//   };
+//   const handleCallStart = () => {
+//     toast.success("Interview Started");
+//   };
+//   const handleCallEnd = () => {
+//     toast.success("Interview Ended");
+//     generatefeedback();
+//   };
+
+//   // Register the listeners
+//   vapi.on("message", handleMessage);
+//   vapi.on("speech-start", handleSpeechStart);
+//   vapi.on("speech-end", handleSpeechEnd);
+//   vapi.on("call-start", handleCallStart);
+//   vapi.on("call-end", handleCallEnd); // Note: Make sure vapi.on("call-end"...) is also in the original code.
+
+//   // Cleanup: Pass the listener functions to vapi.off
+//   return () => {
+//     vapi.off("message", handleMessage);
+//     vapi.off("speech-start", handleSpeechStart);
+//     vapi.off("speech-end", handleSpeechEnd);
+//     vapi.off("call-start", handleCallStart);
+//     vapi.off("call-end", handleCallEnd); // Fix typo: Use "call-end"
+//   };
+// }, []); // Dependency array remains empty
+
+// const generatefeedback = async () => {
+//     if (!conversation) {
+//         console.warn("No conversation data available to send for feedback.");
+//         return;
+//     }
+//         try {
+//         const res = await axios.post("/api/ai_feedback", {
+//             conversation: conversation,
+//         });
+        
+//         console.log("Feedback API Response:", res.data); 
+//     } catch (error) {
+//         console.error("Error generating/fetching feedback:", error);
+//         toast.error("Failed to generate interview feedback.");
+//     }
+    
+//     console.log("Conversation Data sent:", conversation); 
+// };
+
+//   useEffect(() => {
+//     interviewdata && startcall();
+//   }, [interviewdata]);
+
+//   return (
+//     <div className="p-20 lg:px-48 xl:px-56 bg-amber-100 h-full w-full">
+//       <h2 className="font-bold text-xl">AI Interview Session</h2>
+//       <div className="grid grid-cols-1 md:grid-cols-2 gap-7 w-full h-full">
+//         <div className="flex bg-white items-center justify-center w-[100%] h-2/3 rounded-2xl flex-col gap-2">
+//           <div className="relative">
+//             {!activeuser && (
+//               <span className="absolute inset-0 rounded-full animate-ping bg-blue-500 opacity-75" />
+//             )}
+//             <BotMessageSquare size={50} />
+//           </div>
+//           <h2>Interviewer</h2>
+//         </div>
+//         <div className="flex-col gap-2 flex bg-white items-center justify-center w-[100%] h-2/3 rounded-2xl">
+//           <div className="relative">
+//             {activeuser && (
+//               <span className="absolute inset-0 rounded-full animate-ping bg-blue-500 opacity-75" />
+//             )}
+//             <User size={50} />
+//           </div>
+//           <h2>{interviewdata?.Username || "user"}</h2>
+//         </div>
+//       </div>
+//       <div className="w-full flex items-center justify-center gap-3">
+//         <button className="bg-red-500 cursor-pointer rounded-full p-2 w-10 h-10">
+//           <Mic />
+//         </button>
+//         <button
+//           onClick={endcall}
+//           className="bg-red-500 cursor-pointer rounded-full p-2 w-10 h-10"
+//         >
+//           <Phone />
+//         </button>
+//       </div>
+//     </div>
+//   );
+// };
+
+// export default page;
+
+
+
+//  const assistantOptions = {
+//         name: "AI Recruiter",
+//         firstMessage: `Hi ${interviewdata?.Username}, how are you? Ready for your interview on ${jobPosition}?`,
+//         transcriber: {
+//           provider: "deepgram",
+//           model: "nova-2",
+//           language: "en-US",
+//         },
+//         voice: {
+//           provider: "playht",
+//           voiceId: "jennifer",
+//         },
+//         model: {
+//           provider: "openai",
+//           model: "gpt-4",
+//           messages: [
+//             {
+//               role: "system",
+//               content: `
+// Your job is to ask candidates provided interview questions, assess their responses.
+// Begin the conversation with a friendly introduction, setting a relaxed yet professional tone. Example:
+// "Hey there! Welcome to your ${jobPosition} interview, let's get started with a few questions!"
+// Ask one question at a time and wait for the candidate's response before proceeding. Keep the questions clear and concise. Below are the questions: {{questionList}}
+// Questions: ${questions}
+// If the candidate struggles, offer hints or rephrase the question without giving away the answer. Example:
+// "What do you think about how React tracks component updates!"
+// Provide brief, encouraging feedback after each answer. Example:
+// "Nice! That's a solid answer."
+// "Hmm, not quite! Want to try again?"
+// Keep the conversation natural and engaging—use casual phrases like "Alright, next up..." or "Let's tackle a tricky one!"
+// After ${questions.length} questions, wrap up the interview smoothly by summarizing their performance. Example:
+// "That was great! You handled some tough questions well. Keep sharpening your skills!"
+// End on a positive note:
+// "Thanks for chatting! Hope to see you crushing projects soon!"
+
+// Key guidelines:
+// ✅ Be friendly, engaging, and witty 🎤
+// ✅ Keep responses short and natural, like a real conversation
+// ✅ Adapt based on the candidate's confidence level
+// ✅ Ensure the interview remains focused on ${jobPosition}`.trim(),
+//             },
+//           ],
+//         },
+//       };
