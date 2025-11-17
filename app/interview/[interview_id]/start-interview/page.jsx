@@ -215,10 +215,10 @@ End with: INTERVIEW_SUMMARY: <final summary>
     vapi.on("speech-update", handleVapiEvent);
     vapi.on("call-end", handleVapiEvent);
 
-  //   (async () => {
-  // const allowed = await enableMedia();
-  // if (allowed) startCall();
-  // })();
+    (async () => {
+  const allowed = await enableMedia();
+  if (allowed) startCall();
+  })();
 
 
     return () => {

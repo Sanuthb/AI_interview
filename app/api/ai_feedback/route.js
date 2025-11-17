@@ -21,48 +21,62 @@ for hire or not with msg. Give me response in JSON format
 }
 Conversation: 
 {{conversation}}
-`
-
+`;
 
 export async function POST(request) {
-    const {conversation} = await request.json();
-    console.log("Received conversation for feedback:", conversation);
-    const final_prompt = FEEDBACK_PROMPT_TEMPLATE.replace("{{conversation}}",conversation)
-    try {
-      const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-      });
+  const { conversation } = await request.json();
+  const final_prompt = FEEDBACK_PROMPT_TEMPLATE.replace("{{conversation}}", conversation);
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: final_prompt }] }],
+  try {
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
     });
-    
-    // Enhanced JSON Extraction/Parsing
-    let responseText = response.text.trim();
-    // Use a regex to find and extract the JSON block
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/i);
-    
-    let jsonString = jsonMatch ? jsonMatch[1].trim() : responseText;
-    
-    try {
-        const json_data = JSON.parse(jsonString);
-        return new Response(JSON.stringify(json_data), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-    } catch (parseError) {
-        console.error("JSON Parsing Error:", parseError);
-        // Log the raw text that failed to parse for debugging
-        console.error("Raw response text:", responseText); 
-        return new Response(JSON.stringify({ error: "Failed to parse AI feedback JSON" }), { 
-            status: 500,
-            headers: { 'Content-Type': 'application/json' } 
-        });
-    }
-    } catch (error) {
-      console.error("Gemini API Feedback Error:", error);
-      return new Response(JSON.stringify({ error: "Failed to generate AI feedback" }), { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' } 
+    // ⚡ More stable than 2.5
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: [{ role: "user", parts: [{ text: final_prompt }] }],
+    });
+
+    let responseText = response.text.trim();
+
+    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/i);
+    let jsonString = jsonMatch ? jsonMatch[1].trim() : responseText;
+
+    try {
+      const json_data = JSON.parse(jsonString);
+      return new Response(JSON.stringify(json_data), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
       });
+    } catch (parseError) {
+      return new Response(
+        JSON.stringify({
+          error: "Feedback generated but parsing failed",
+          raw: responseText,
+        }),
+        { status: 200 }
+      );
     }
+  } catch (error) {
+    console.error("Gemini Feedback Error:", error);
+
+    // ⚠️ Fallback to avoid losing interview results
+    return new Response(
+      JSON.stringify({
+        feedback: {
+          rating: {
+            technicalSkills: 0,
+            communication: 0,
+            problemSolving: 0,
+            experince: 0,
+          },
+          summary: "Unable to generate feedback at the moment.",
+          Recommendation: "Not Available",
+          RecommendationMsg: "AI feedback service was temporarily unavailable.",
+        },
+      }),
+      { status: 200 }
+    );
+  }
 }
