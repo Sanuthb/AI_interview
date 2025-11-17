@@ -49,7 +49,7 @@ const page = () => {
         jobposition: data.jobPosition,
         questionlist: data.questionlist,
       });
-      router.push(`/interview/${interview_id}/sample`);
+      router.push(`/interview/${interview_id}/start-interview`);
     } catch (err) {
       console.error(err);
       toast.error("Failed to load interview data.");

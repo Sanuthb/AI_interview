@@ -1,11 +1,9 @@
 import InterviewProvider from "@/context/InterviewContext";
-import InterviewHeader from "./_component/InterviewHeader";
 
 export default function Layout({ children }) {
   return (
     <InterviewProvider>
-      <div className="flex flex-col w-full h-screen overflow-hidden">
-        <InterviewHeader />
+      <div className="flex flex-col w-full min-h-screen max-h-screen overflow-hidden">
         <main className="flex-1 bg-gray-100 flex items-center justify-center overflow-hidden">
           {children}
         </main>
